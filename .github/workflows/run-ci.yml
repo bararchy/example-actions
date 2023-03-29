@@ -30,6 +30,8 @@ jobs:
             [ "crawler" ]
           crawler_urls: |
             [ "https://brokencrystals.com" ]
+          tests: |
+            [ "xxe" ]
       - name: Wait for breakpoint
         id: wait
         uses: NeuraLegion/wait-for@release
