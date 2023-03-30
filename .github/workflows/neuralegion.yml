@@ -188,5 +188,5 @@ jobs:
           scan: ${{ steps.start.outputs.id }}
           wait_for: any
           code_scanning_alerts: true
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+          github_token: ${{ secrets.KEY_GITHUB }}
           timeout: 600
