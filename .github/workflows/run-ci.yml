@@ -1,61 +1,50 @@
-name: CI
+name: BrightSec Scan Workflow
 
 on:
+  workflow_dispatch:
   push:
     branches:
-      - crawler
-      - har-file
-      - swagger
       - brokencrystals
-  pull_request:
-    branches: [main]
-  schedule:
-    - cron: "0 0 * * THU"
 
 jobs:
-  start_and_wait_scan:
-    runs-on: ubuntu-18.04
-    name: A job to run a Nexploit scan
+  bright-scan:
+    runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v2
-      - run: |
-          sudo apt update
-          sudo curl -L "https://github.com/docker/compose/releases/download/1.26.0/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-          sudo chmod +x /usr/local/bin/docker-compose
-          sudo apt-get install nodejs-dev node-gyp libssl1.0-dev
-          sudo apt-get install nodejs npm
-          sudo npm install -g @neuralegion/nexploit-cli --unsafe-perm=true
-      - name: Save environment variables
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Install jq
         run: |
-          printf "NEXPLOIT_TOKEN=${{ secrets.NEXPLOIT_TOKEN }}\nREPEATER=${{ secrets.REPEATER }}\n" > .env
-          cat .env
-      - name: Docker-Compose
+          sudo apt-get update
+          sudo apt-get install -y jq
+
+      - name: Download BrightSec CLI
         run: |
-          sudo docker-compose --env-file=.env up -d
-          sudo docker-compose config
-      - run: sleep 30s
-      - run: sudo docker-compose logs
-      - name: Start Nexploit Scan 🏁
-        id: start
+          curl -L -o bright-cli-linux-x64 https://github.com/NeuraLegion/bright-cli/releases/download/v12.6.0/bright-cli-linux-x64
+          chmod +x bright-cli-linux-x64
+
+      - name: Fetch entrypoints from BrightSec
+        id: get_entrypoints
+        env:
+          BRIGHT_KEY: ${{ secrets.BRIGHT_KEY }}
+          PROJECT_ID: ${{ secrets.PROJECT_ID }}
         run: |
-          SCAN_ID=$(nexploit-cli scan:run                                                 \
-            --test csrf dom_xss header_security secret_tokens open_buckets                 \
-            --name "💎 BrokenCrystals for a '${GITHUB_REF##*/}' branch #${GITHUB_RUN_NUMBER}" \
-            --crawler https://brokencrystals.com/api/config https://brokencrystals.com/  \
-            --repeater ${{ secrets.REPEATER }}                                            \
-            --token ${{ secrets.NEXPLOIT_TOKEN }})
-          echo "SCAN_ID=$SCAN_ID" >> $GITHUB_ENV
-      - name: Get the output scan url 🔗
+          ./bright-cli-linux-x64 entrypoints:list -t "$BRIGHT_KEY" -p "$PROJECT_ID" --status new --status changed > entrypoints.json
+
+      - name: Extract entrypoint IDs
+        id: extract_ids
         run: |
-          printf "Scan was started with ID https://nexploit.app/scans/$SCAN_ID"
-      - name: Wait for issues ⏳
+          ids=$(jq -r '.[].id' entrypoints.json | tr '\n' ' ')
+          echo "::set-output name=entrypoint_ids::$ids"
+        shell: bash
+
+      - name: Run scan with entrypoint IDs
+        env:
+          BRIGHT_KEY: ${{ secrets.BRIGHT_KEY }}
+          PROJECT_ID: ${{ secrets.PROJECT_ID }}
         run: |
-          nexploit-cli scan:polling               \
-            --interval 30s                        \
-            --timeout 10m                         \
-            --token ${{ secrets.NEXPLOIT_TOKEN }} \
-            --breakpoint high_issue $SCAN_ID
-      - name: Stop Scan 🛑
-        continue-on-error: true
-        if: ${{ always() }}
-        run: nexploit-cli scan:stop --token ${{ secrets.NEXPLOIT_TOKEN }} $SCAN_ID
+          TIMESTAMP=$(date +'%Y-%m-%d_%H-%M-%S')
+          SCAN_NAME="automated scan $TIMESTAMP"
+          ENTRYPOINT_FLAGS=$(echo "${{ steps.extract_ids.outputs.entrypoint_ids }}" | xargs -n1 -I{} echo -e "-e {}" | tr '\n' ' ')
+          ./bright-cli-linux-x64 scan:run -t "$BRIGHT_KEY" -n "$SCAN_NAME" $ENTRYPOINT_FLAGS -p "$PROJECT_ID"
