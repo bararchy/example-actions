@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - brokencrystals
+      - main
 
 jobs:
   bright-scan:
@@ -36,7 +36,7 @@ jobs:
         id: extract_ids
         run: |
           ids=$(jq -r '.[].id' entrypoints.json | tr '\n' ' ')
-          echo "::set-output name=entrypoint_ids::$ids"
+          echo "entrypoint_ids=$ids" >> $GITHUB_OUTPUT
         shell: bash
 
       - name: Run scan with entrypoint IDs
@@ -46,5 +46,5 @@ jobs:
         run: |
           TIMESTAMP=$(date +'%Y-%m-%d_%H-%M-%S')
           SCAN_NAME="automated scan $TIMESTAMP"
-          ENTRYPOINT_FLAGS=$(echo "${{ steps.extract_ids.outputs.entrypoint_ids }}" | xargs -n1 -I{} echo -e "-e {}" | tr '\n' ' ')
-          ./bright-cli-linux-x64 scan:run -t "$BRIGHT_KEY" -n "$SCAN_NAME" $ENTRYPOINT_FLAGS -p "$PROJECT_ID"
+          ENTRYPOINT_FLAGS=$(echo "${{ steps.extract_ids.outputs.entrypoint_ids }}" | sed 's/ / -e /g')
+          ./bright-cli-linux-x64 scan:run -t "$BRIGHT_KEY" -n "$SCAN_NAME" -e $ENTRYPOINT_FLAGS -p "$PROJECT_ID"
